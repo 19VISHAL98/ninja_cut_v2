@@ -21,6 +21,7 @@ export const generateUUIDv7 = () => {
 }
 export const updateBalanceFromAccount = async (data, key, playerDetails) => {
     try {
+        console.log("===========", data, key, playerDetails);
         const webhookData = await prepareDataForWebhook({ ...data, game_id: playerDetails.game_id }, key);
         if (key === 'CREDIT') {
             await sendToQueue('', 'games_cashout', JSON.stringify({ ...webhookData, operatorId: playerDetails.operatorId, token: playerDetails.token }));
@@ -59,36 +60,86 @@ export const sendRequestToAccounts = async (webhookData, token) => {
 }
 export const prepareDataForWebhook = async (betObj, key) => {
     try {
+        console.log("betObj", betObj);
 
-        let { id, bet_amount, winning_amount, game_id, user_id, txn_id, ip } = betObj;
+        const {
+            matchId,
+            betAmount,
+            winAmount,
+            game_id,
+            user_id,
+            txn_id = "",
+            ip = ""
+        } = betObj;
 
-        bet_amount = Number(bet_amount).toFixed(2);
+        const bet_amount = Number(betAmount || 0).toFixed(2);
+        const winning_amount = Number(winAmount || 0).toFixed(2);
+
         let obj = {
-            txn_id: generateUUIDv7(),
+            txn_id: txn_id || generateUUIDv7(),
             ip,
             game_id,
             user_id: decodeURIComponent(user_id)
         };
+
         switch (key) {
             case "DEBIT":
-                obj.amount = bet_amount,
-                    obj.description = `${bet_amount} debited for Double wheel game for Round ${id}`;
-                obj.bet_id = id;
+                obj.amount = bet_amount;
+                obj.description = `${bet_amount} debited for Double wheel game for Round ${matchId}`;
+                obj.bet_id = matchId;
                 obj.txn_type = 0;
                 break;
+
             case "CREDIT":
                 obj.amount = winning_amount;
                 obj.txn_ref_id = txn_id;
-                obj.description = `${winning_amount} credited for Double wheel game for Round ${id}`;
+                obj.description = `${winning_amount} credited for Double wheel game for Round ${matchId}`;
                 obj.txn_type = 1;
                 break;
+
             default:
-                obj;
+                break;
         }
+
         return obj;
     } catch (err) {
         console.error(`[ERR] while trying to prepare data for webhook is::`, err);
         return false;
     }
 };
+
+// export const prepareDataForWebhook = async (betObj, key) => {
+//     try {
+//         console.log("betObj", betObj);
+//         let newObj = { id: betObj.matchId, bet_amount: betObj.betAmount, winning_amount: betObj.winAmount, game_id: betObj.game_id, user_id: betObj.user_id, txn_id: betObj.txn_id || "", ip: "" }
+//         console.log("--------", newObj);
+//         bet_amount = Number(bet_amount).toFixed(2);
+//         let obj = {
+//             txn_id: generateUUIDv7(),
+//             ip,
+//             game_id,
+//             user_id: decodeURIComponent(user_id)
+//         };
+//         switch (key) {
+//             case "DEBIT":
+//                 obj.amount = bet_amount,
+//                     obj.description = `${bet_amount} debited for Double wheel game for Round ${id}`;
+//                 obj.bet_id = id;
+//                 obj.txn_type = 0;
+//                 break;
+//             case "CREDIT":
+//                 obj.amount = winning_amount;
+//                 obj.txn_ref_id = txn_id;
+//                 obj.description = `${winning_amount} credited for Double wheel game for Round ${id}`;
+//                 obj.txn_type = 1;
+//                 break;
+//             default:
+//                 obj;
+//         }
+//         return obj;
+//     } catch (err) {
+//         console.error(`[ERR] while trying to prepare data for webhook is::`, err);
+//         return false;
+//     }
+// };
 

@@ -53,7 +53,7 @@ export const sendToQueue = async (ex, queueName, message, delay = 0, retries = 0
         });
         rabbitMQLogger.info(`Message sent to ${queueName} queue on exchange ${exchange} with data ${JSON.stringify(message)}`);
     } catch (error) {
-        console.log(error);
+        console.error(error);
         rabbitMQLogger.error(`Failed to send message to ${queueName} queue on exchange ${exchange}: ${error.message}`);
         throw error;
     }

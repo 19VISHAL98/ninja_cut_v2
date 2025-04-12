@@ -1,15 +1,20 @@
 import { getCurrentRound, getPreviousRoundData, getRoundData, startNewRound } from "../../lobby/lobbyUtilities.js";
 import { logEventAndEmitResponse } from "../../utilities/helper-function.js";
-import { getCache } from "../../utilities/redis-connection.js";
+import { getCache, setCache } from "../../utilities/redis-connection.js";
 import { appConfig } from "../../utilities/app-config.js";
 import { createLogger } from "../../utilities/logger.js";
-import { generateUUIDv7 } from "../../utilities/common-function.js";
+import { generateUUIDv7, prepareDataForWebhook } from "../../utilities/common-function.js";
+import { sendToQueue } from "../../utilities/amqp.js";
 
 const betsLogger = createLogger("Bets", "jsonl")
+const failedCashoutLogger = createLogger("FailedBets", "jsonl")
+const sliceFailedFruitLogger = createLogger("FailedSliceFruit", "jsonl")
+const sliceFruitLogger = createLogger("SliceFruit", "jsonl")
+const matchEndLogger = createLogger("MatchEnd", "jsonl")
 
 let bets = [];
-export async function placeBet(socket, data) {
 
+export async function placeBet(socket, data) {
   let [amount] = data;
   let betAmount = amount;
   const playerId = `PL:${socket.id}`;
@@ -33,7 +38,8 @@ export async function placeBet(socket, data) {
   startNewRound(socket, playerDetails.user_id)
   const bet = {};
   const currentRound = getCurrentRound(playerDetails.user_id);
-  bet.matchId = currentRound ? generateUUIDv7() : "";
+  // bet.matchId = currentRound ? generateUUIDv7() : "";
+  bet.matchId = currentRound ? "019628e9-10104cbf-7336-832b9a-32" : "";
   bet.multiplier = 1;
   bet.betAmount = Number(amount);
   bet.winAmount = 0;
@@ -43,6 +49,7 @@ export async function placeBet(socket, data) {
   bet.matchStartTime = Date.now();
   bet.serverTime = Date.now();
   bets.push(bet);
+  console.log("bets", bets);
   betsLogger.info(JSON.stringify({ req: logReqObj, res: bet }));
   return socket.emit('bet', bet);
 }
@@ -53,18 +60,19 @@ const timers = {};
 export async function sliceSweet(socket, data) {
   const [matchId, roundId, fruitId] = data;
   const playerId = `PL:${socket.id}`;
-  const releaseLock = await acquireLock(playerId);
   try {
     let logReqObj = { playerId, matchId, roundId, fruitId }
     const bet = bets.find(e => e.matchId === matchId);
-    if (!bet || !matchId) return logEventAndEmitResponse(socket, logReqObj, 'No Active bet for the match ID', 'sliceFruit');
+    if (!bet || !matchId) return logEventAndEmitResponse(logReqObj, 'No Active bet for the match ID', 'sliceFruit', socket);
 
+    let playerDetails = await getCache(playerId);
+    const parsedPlayerDetails = await JSON.parse(playerDetails);
+    if (!playerDetails) return logEventAndEmitResponse(logReqObj, 'Session Timed Out', 'bet', socket);
 
-
-    let getRoundDetails = getRoundData(playerDetails.user_id, roundId);
+    let getRoundDetails = getRoundData(parsedPlayerDetails?.user_id, roundId);
 
     if (!getRoundDetails) {
-      getRoundDetails = getPreviousRoundData(playerDetails.user_id, roundId);
+      getRoundDetails = getPreviousRoundData(parsedPlayerDetails.user_id, roundId);
 
       if (getRoundDetails) {
         getRoundDetails.FruitData = typeof getRoundDetails.FruitData === 'string' ? JSON.parse(getRoundDetails.FruitData) : getRoundDetails.FruitData;
@@ -75,13 +83,11 @@ export async function sliceSweet(socket, data) {
       }
     }
 
-    if (!getRoundDetails || !roundId) return logEventAndEmitResponse(socket, logReqObj, 'Round has been closed for this event', 'sliceFruit');
+    if (!getRoundDetails || !roundId) return logEventAndEmitResponse(logReqObj, 'Round has been closed for this event', 'sliceFruit', socket);
 
     let fruit = getRoundDetails.FruitData.find(e => e.FruitId == fruitId);
-    if (!fruit || !fruitId) return logEventAndEmitResponse(socket, logReqObj, 'Invalid fruit id or fruit does not belongs to the round', 'sliceFruit');
+    if (!fruit || !fruitId) return logEventAndEmitResponse(logReqObj, 'Invalid fruit id or fruit does not belongs to the round', 'sliceFruit', socket);
 
-    let playerDetails = await getCache(playerId);
-    if (!playerDetails) return logEventAndEmitResponse(socket, logReqObj, 'Session Timed Out', 'bet', io);
 
     bet.timeoutInterval = 50;
 
@@ -95,13 +101,13 @@ export async function sliceSweet(socket, data) {
 
     //Send Callback
     if (bet.cutFruits.length === 1) {
-      const firstCutSuccess = await handleFirstCut(io, socket, bet, playerDetails, logReqObj);
+      const firstCutSuccess = await handleFirstCut(socket, bet, parsedPlayerDetails, logReqObj);
       if (!firstCutSuccess) return;
     }
 
     // Handle fruit with a multiplier of 0
     if (fruit.Multiplier === 0) {
-      await handleFruitLoss(socket, matchId, bet, playerDetails, logReqObj);
+      await handleFruitLoss(socket, matchId, bet, parsedPlayerDetails, logReqObj);
       return;
     }
 
@@ -109,19 +115,16 @@ export async function sliceSweet(socket, data) {
     bet.winAmount = parseFloat(Number(bet.betAmount) * bet.multiplier);
     bet.winAmount = bet.winAmount < 0.01 ? 0 : Number(Number(bet.winAmount).toFixed(2));
     if (Number(bet.winAmount) <= 0) {
-      await handleFruitLoss(io, socket, matchId, bet, playerDetails, logReqObj);
+      await handleFruitLoss(socket, matchId, bet, parsedPlayerDetails, logReqObj);
       return;
     }
     bet.status = 'BET_PLACED';
     sliceFruitLogger.info(JSON.stringify({ req: logReqObj, res: bet }));
     return socket.emit('fruitSlice', bet);
   } catch (err) {
-    console.log(err);
+    console.error(err);
     return socket.emit('fruitSlice', 'Something went wrong');
-  } finally {
-    releaseLock();
   }
-
 }
 
 function clearExistingTimer(matchId) {
@@ -132,40 +135,41 @@ function clearExistingTimer(matchId) {
 }
 
 function setMatchEndTimer(socket, matchId) {
-  timers[matchId] = setTimeout(async () => await endMatch(io, socket, [matchId]), 50000); // 50 seconds
+  timers[matchId] = setTimeout(async () => await endMatch(socket, [matchId]), 50000); // 50 seconds
 }
 
-const acquireLock = async (user_id) => {
-  while (userLocks.get(user_id)) {
-    await userLocks.get(user_id);
-  }
+// const acquireLock = async (user_id) => {
+//   while (userLocks.get(user_id)) {
+//     await userLocks.get(user_id);
+//   }
 
-  let resolveLock;
-  const lockPromise = new Promise((resolve) => {
-    resolveLock = resolve;
-  });
+//   let resolveLock;
+//   const lockPromise = new Promise((resolve) => {
+//     resolveLock = resolve;
+//   });
 
-  userLocks.set(user_id, lockPromise);
+//   userLocks.set(user_id, lockPromise);
 
-  return () => {
-    resolveLock();
-    userLocks.delete(user_id);
-  };
-};
+//   return () => {
+//     resolveLock();
+//     userLocks.delete(user_id);
+//   };
+// };
 
 
 export async function handleFirstCut(socket, bet, playerDetails, logReqObj) {
-  await addBetsToDB({ ...bet, ...playerDetails });
+  // await addBetsToDB({ ...bet, ...playerDetails });
   const playerId = playerDetails.socket_id;
-  const webhookData = await prepareDataForWebhook({ ...bet, user_id: playerDetails.id, playerId, game_id: playerDetails.game_id }, "DEBIT", socket);
+  console.log({ ...bet, ...playerDetails });
+  const webhookData = await prepareDataForWebhook({ ...bet, ...playerDetails }, "DEBIT", socket);
   bet.txn_id = webhookData.txn_id;
-
+  console.log(webhookData);
   try {
-    const data = await postDataToSourceForBet({ webhookData, token: playerDetails.session_token });
-    if (data.status !== 200) {
-      handleBetFailure(socket, bet.matchId, logReqObj, 'Slice Fruit event failed from upstream server');
-      return false;
-    }
+    // const data = await postDataToSourceForBet({ webhookData, token: playerDetails.session_token });
+    // if (data.status !== 200) {
+    //   handleBetFailure(socket, bet.matchId, logReqObj, 'Slice Fruit event failed from upstream server');
+    //   return false;
+    // }
 
     console.log(`User balance updated successfully for user id: ${playerDetails.id}`);
     playerDetails.balance -= bet.betAmount;
@@ -173,7 +177,7 @@ export async function handleFirstCut(socket, bet, playerDetails, logReqObj) {
     socket.emit('info', playerDetails);
     return true;
   } catch (err) {
-    await handleBetError(io, socket, bet.matchId, err, logReqObj, playerId);
+    await handleBetError(socket, bet.matchId, err, logReqObj, playerId);
     return false;
   }
 }
@@ -181,7 +185,7 @@ export async function handleFirstCut(socket, bet, playerDetails, logReqObj) {
 function handleBetFailure(socket, matchId, logReqObj, errorMsg) {
   bets = bets.filter(e => e.matchId !== matchId);
   clearExistingTimer(matchId);
-  logEventAndEmitResponse(socket, logReqObj, errorMsg, 'sliceFruit');
+  logEventAndEmitResponse(logReqObj, errorMsg, 'sliceFruit', socket);
   return;
 }
 
@@ -192,7 +196,7 @@ export async function handleBetError(socket, matchId, err, logReqObj, playerId) 
   if (err.response?.data?.msg === "Invalid Token or session timed out") {
     await deleteCache(playerId);
     sliceFailedFruitLogger.error(JSON.stringify({ req: logReqObj, res: 'Invalid Token or session timed out' }));
-    io.to(playerId).emit("logout", playerId);
+    socket.emit("logout", playerId);
   } else {
     sliceFailedFruitLogger.error(JSON.stringify({ req: logReqObj, res: 'Bet Debit request failed from upstream server' }));
     socket.emit('betError', 'Bet Debit request failed from upstream server');
@@ -208,7 +212,7 @@ export async function handleFruitLoss(socket, matchId, bet, playerDetails, logRe
   bet.status = 'LOSS';
   bet.balance = playerDetails.balance;
   bet.matchEndTime = Date.now();
-  await addSettlement({ ...bet, ...playerDetails });
+  // await addSettlement({ ...bet, ...playerDetails });
   clearExistingTimer(matchId);
   matchEndLogger.info(JSON.stringify({ req: logReqObj, res: bet }));
   return socket.emit('matchEnd', bet);
@@ -218,21 +222,21 @@ export async function handleFruitLoss(socket, matchId, bet, playerDetails, logRe
 //End Match Logic
 export async function endMatch(socket, data) {
   const [matchId] = data;
-  const playerId = socket.id;
+  const playerId = `PL:${socket.id}`;
   let logReqObj = { matchId };
   const bet = bets.find(e => e.matchId === matchId);
 
   if (!bet || bet.matchId !== matchId || !matchId) {
     const errorMsg = !bet ? 'No active bet for the player' : 'Invalid match id or match id does not belong to the player';
-    return logEventAndEmitResponse(socket, logReqObj, errorMsg, 'endMatch');
+    return logEventAndEmitResponse(logReqObj, errorMsg, 'endMatch', socket);
   }
 
   bet.matchEndTime = Date.now();
   bet.serverTime = Date.now();
   bet.timeoutInterval = 50;
-  let playerDetails = await getUserData(playerId);
-  if (!playerDetails) return logEventAndEmitResponse(socket, matchId, 'Invalid Player Details', 'endMatch', io);
-
+  let playerDetails = await getCache(playerId);
+  if (!playerDetails) return logEventAndEmitResponse(matchId, 'Invalid Player Details', 'endMatch', socket);
+  const parsedPlayerDetails = JSON.parse(playerDetails);
   if (bet.cutFruits.length === 0) {
     matchEndLogger.info(JSON.stringify({ req: logReqObj, res: bet }));
     return socket.emit('matchEnd', bet)
@@ -241,22 +245,22 @@ export async function endMatch(socket, data) {
   bet.winAmount = parseFloat(+bet.betAmount * bet.multiplier);
   bet.winAmount = bet.winAmount < 0.01 ? 0 : Number(Number(bet.winAmount).toFixed(2));
   bet.status = "WIN";
-  bet.balance = playerDetails.balance + Number(bet.winAmount);
+  bet.balance = parsedPlayerDetails.balance + Number(bet.winAmount);
 
 
   //storing in db
-  await addSettlement({ ...bet, ...playerDetails });
-  const webhookData = await prepareDataForWebhook({ ...bet, user_id: playerDetails.id, playerId, game_id: playerDetails.game_id }, "CREDIT", socket);
+  // await addSettlement({ ...bet, ...parsedPlayerDetails });
+  const webhookData = await prepareDataForWebhook({ ...bet, user_id: parsedPlayerDetails.id, playerId, game_id: parsedPlayerDetails.game_id }, "CREDIT", socket);
 
   //third party API call
-  const apiSuccess = await handleThirdPartyAPICall(webhookData, playerDetails);
+  const apiSuccess = await handleThirdPartyAPICall(webhookData, parsedPlayerDetails);
   if (!apiSuccess) return;
 
 
-  playerDetails.balance = bet.balance;
-  await setCache(playerId, JSON.stringify(playerDetails));
+  parsedPlayerDetails.balance = bet.balance;
+  await setCache(playerId, JSON.stringify(parsedPlayerDetails));
   bets = bets.filter(e => e.matchId !== matchId);
-  socket.emit('info', playerDetails);
+  socket.emit('info', parsedPlayerDetails);
   clearExistingTimer(matchId);
   matchEndLogger.info(JSON.stringify({ req: logReqObj, res: bet }));
   return socket.emit('matchEnd', bet)

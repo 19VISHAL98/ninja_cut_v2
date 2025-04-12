@@ -1,5 +1,4 @@
 import { appConfig } from "../utilities/app-config.js";
-console.log(appConfig)
 import { generateUUIDv7, prepareDataForWebhook, updateBalanceFromAccount } from "../utilities/common-function.js";
 import { getCache, deleteCache, setCache } from "../utilities/redis-connection.js";
 import { createLogger } from "../utilities/logger.js";
@@ -41,7 +40,6 @@ export const spin = async (socket, bet) => {
     if (Number(playerDetails.balance) < betAmount) {
         return logEventAndEmitResponse({ player: playerDetails, betAmount, bet }, 'Insufficient Balance', 'bet', socket);
     }
-    console.log("appConfig--------", appConfig)
 
     if (betAmount < appConfig.minBetAmount || betAmount > appConfig.maxBetAmount) {
         return logEventAndEmitResponse({ player: playerDetails, betAmount, bet }, 'Invalid Bet Amount', 'bet', socket);

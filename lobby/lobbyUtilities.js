@@ -67,7 +67,7 @@ export async function startNewRound(socket, userId) {
     logger.info(JSON.stringify(newRound));
     // await write(LOBBY_SQL, [...Object.values(newRound)]);
     rounds.length = 0; //Deleting ended round to avoid unnecassary consumption of memory
-    return startNewRound(socket);
+    return startNewRound(socket, userId);
 }
 
 function updateRoundStatus(socket, userId, roundId, status) {
@@ -90,8 +90,7 @@ function endRound(socket, userId, roundId) {
 }
 
 export function getCurrentRound(userId) {
-    const lastCurRound = rounds[`${userId}`][rounds[`${userId}`].length - 1];
-    return lastCurRound;
+    return rounds[`${userId}`][rounds[`${userId}`].length - 1];
 }
 
 export function getRoundData(userId, roundId) {

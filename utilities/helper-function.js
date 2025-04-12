@@ -2,7 +2,7 @@ import { createLogger } from "./logger.js";
 const failedBetLogger = createLogger('failedBets', 'jsonl');
 
 export const logEventAndEmitResponse = (req, res, event, socket) => {
-  let logData = JSON.stringify({ req, res })
+  let logData = JSON.stringify({ req, res, event, socket: socket.id })
   if (event === 'bet') {
     failedBetLogger.error(logData)
   }
