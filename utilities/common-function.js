@@ -1,4 +1,4 @@
-import axios  from 'axios';
+import axios from 'axios';
 import crypto from 'crypto';
 import { sendToQueue } from './amqp.js';
 import { createLogger } from './logger.js';
@@ -10,32 +10,32 @@ export const generateUUIDv7 = () => {
     const timeHex = timestamp.toString(16).padStart(12, '0');
     const randomBits = crypto.randomBytes(8).toString('hex').slice(2);
     const uuid = [
-        timeHex.slice(0, 8),  
-        timeHex.slice(8) + randomBits.slice(0, 4),  
-        '7' + randomBits.slice(4, 7),  
-        (parseInt(randomBits.slice(7, 8), 16) & 0x3f | 0x80).toString(16) + randomBits.slice(8, 12),  
-        randomBits.slice(12) 
+        timeHex.slice(0, 8),
+        timeHex.slice(8) + randomBits.slice(0, 4),
+        '7' + randomBits.slice(4, 7),
+        (parseInt(randomBits.slice(7, 8), 16) & 0x3f | 0x80).toString(16) + randomBits.slice(8, 12),
+        randomBits.slice(12)
     ];
 
     return uuid.join('-');
 }
-export const updateBalanceFromAccount = async(data, key, playerDetails) => {
+export const updateBalanceFromAccount = async (data, key, playerDetails) => {
     try {
         const webhookData = await prepareDataForWebhook({ ...data, game_id: playerDetails.game_id }, key);
-        if(key === 'CREDIT'){
-            await sendToQueue('', 'games_cashout', JSON.stringify({ ...webhookData, operatorId: playerDetails.operatorId, token: playerDetails.token}));
+        if (key === 'CREDIT') {
+            await sendToQueue('', 'games_cashout', JSON.stringify({ ...webhookData, operatorId: playerDetails.operatorId, token: playerDetails.token }));
             return true;
         }
         data.txn_id = webhookData.txn_id;
         const sendRequest = await sendRequestToAccounts(webhookData, playerDetails.token);
-        if (!sendRequest) return false;        
+        if (!sendRequest) return false;
         return data;
     } catch (err) {
         console.error(`Err while updating Player's balance is`, err);
         return false;
     }
 }
-export const sendRequestToAccounts = async(webhookData, token)=> {
+export const sendRequestToAccounts = async (webhookData, token) => {
     try {
         const url = process.env.service_base_url;
         let clientServerOptions = {
@@ -48,19 +48,19 @@ export const sendRequestToAccounts = async(webhookData, token)=> {
             timeout: 1000 * 5
         };
         const data = (await axios(clientServerOptions))?.data;
-        thirdPartyLogger.info(JSON.stringify({ logId: generateUUIDv7(), req: clientServerOptions, res: data}))
+        thirdPartyLogger.info(JSON.stringify({ logId: generateUUIDv7(), req: clientServerOptions, res: data }))
         if (!data.status) return false;
         return true;
     } catch (err) {
         console.error(`Err while sending request to accounts is:::`, err?.response?.data);
-        failedThirdPartyLogger.error(JSON.stringify({ logId: generateUUIDv7(), req: {webhookData, token}, res: err?.response?.status}));
+        failedThirdPartyLogger.error(JSON.stringify({ logId: generateUUIDv7(), req: { webhookData, token }, res: err?.response?.status }));
         return false;
     }
 }
-export const prepareDataForWebhook = async(betObj, key) => {
+export const prepareDataForWebhook = async (betObj, key) => {
     try {
 
-        let {id, bet_amount, winning_amount, game_id, user_id, txn_id, ip} = betObj;
+        let { id, bet_amount, winning_amount, game_id, user_id, txn_id, ip } = betObj;
 
         bet_amount = Number(bet_amount).toFixed(2);
         let obj = {
@@ -72,7 +72,7 @@ export const prepareDataForWebhook = async(betObj, key) => {
         switch (key) {
             case "DEBIT":
                 obj.amount = bet_amount,
-                obj.description = `${bet_amount} debited for Double wheel game for Round ${id}`;
+                    obj.description = `${bet_amount} debited for Double wheel game for Round ${id}`;
                 obj.bet_id = id;
                 obj.txn_type = 0;
                 break;

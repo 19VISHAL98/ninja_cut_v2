@@ -1,5 +1,5 @@
 import client from "amqplib";
-import {createLogger} from '../utilities/logger.js';
+import { createLogger } from '../utilities/logger.js';
 const rabbitMQLogger = createLogger('Queue');
 
 let pubChannel, subChannel = null;
@@ -7,11 +7,11 @@ let connected = false;
 const { AMQP_CONNECTION_STRING, AMQP_EXCHANGE_NAME } = process.env;
 const exchange = AMQP_EXCHANGE_NAME;
 
-export const initQueue = async() => {
+export const initQueue = async () => {
     await connect();
 }
 
-export const connect = async() => {
+export const connect = async () => {
     if (connected && pubChannel && subChannel) return;
     try {
         rabbitMQLogger.info("⌛️ Connecting to Rabbit-MQ Server", AMQP_CONNECTION_STRING.split('@')[1]);
@@ -21,14 +21,16 @@ export const connect = async() => {
             connection.createChannel(),
             connection.createChannel()
         ]);
-        await pubChannel.assertExchange(exchange, "x-delayed-message", { autoDelete: false, durable: true,  
-            arguments: { "x-delayed-type": "direct" } });    
+        await pubChannel.assertExchange(exchange, "x-delayed-message", {
+            autoDelete: false, durable: true,
+            arguments: { "x-delayed-type": "direct" }
+        });
         pubChannel.removeAllListeners('close');
         pubChannel.removeAllListeners('error');
         subChannel.removeAllListeners('close');
         subChannel.removeAllListeners('error');
         pubChannel.on('close', async () => { console.error("pubChannel Closed"); pubChannel = null; connected = false; });
-        subChannel.on('close', async () => { console.error("subChannel Closed"); subChannel = null; connected = false; setTimeout(()=>initQueue(),1000)});
+        subChannel.on('close', async () => { console.error("subChannel Closed"); subChannel = null; connected = false; setTimeout(() => initQueue(), 1000) });
         pubChannel.on('error', async (msg) => { console.error("pubChannel Error", msg); });
         subChannel.on('error', async (msg) => { console.error("subChannel Error", msg); });
         rabbitMQLogger.info("🛸 Created RabbitMQ Channel successfully");
@@ -39,7 +41,7 @@ export const connect = async() => {
     }
 }
 
-export const sendToQueue = async(ex, queueName, message, delay = 0, retries = 0) => {
+export const sendToQueue = async (ex, queueName, message, delay = 0, retries = 0) => {
     try {
         if (!pubChannel || pubChannel.connection._closing) {
             await connect();

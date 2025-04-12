@@ -26,7 +26,7 @@ export const getUserDataFromSource = async (token, game_id) => {
         }
         return;
     } catch (err) {
-        console.log(err);
+        console.error(err.message);
         return false;
     }
 };

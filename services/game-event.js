@@ -1,4 +1,5 @@
 import { appConfig } from "../utilities/app-config.js";
+console.log(appConfig)
 import { generateUUIDv7, prepareDataForWebhook, updateBalanceFromAccount } from "../utilities/common-function.js";
 import { getCache, deleteCache, setCache } from "../utilities/redis-connection.js";
 import { createLogger } from "../utilities/logger.js";
@@ -40,6 +41,7 @@ export const spin = async (socket, bet) => {
     if (Number(playerDetails.balance) < betAmount) {
         return logEventAndEmitResponse({ player: playerDetails, betAmount, bet }, 'Insufficient Balance', 'bet', socket);
     }
+    console.log("appConfig--------", appConfig)
 
     if (betAmount < appConfig.minBetAmount || betAmount > appConfig.maxBetAmount) {
         return logEventAndEmitResponse({ player: playerDetails, betAmount, bet }, 'Invalid Bet Amount', 'bet', socket);
@@ -91,7 +93,7 @@ export const spin = async (socket, bet) => {
     const parsedBet = bet.split(",").map(item => item.split("-"));
     const multiplierValues = parsedBet.map(item => item[0]);
     const multiplierAmounts = parsedBet.map(item => item[1]);
-    
+
     let winning_bet = 0;
     const calculateWinAmount = () => {
         if (leftMultiplier === rightMultiplier) {
@@ -100,20 +102,20 @@ export const spin = async (socket, bet) => {
             return index !== -1 ? multiplierAmounts[index] * leftMultiplier : 0;
         }
         if ((leftMultiplier === "wild") ^ (rightMultiplier === "wild")) {
-            const intVal = leftMultiplier == "wild"? rightMultiplier : leftMultiplier;
-            const index =  multiplierValues.findIndex(x => x == intVal);
-        
+            const intVal = leftMultiplier == "wild" ? rightMultiplier : leftMultiplier;
+            const index = multiplierValues.findIndex(x => x == intVal);
+
             if (index !== -1) {
                 winning_bet = multiplierAmounts[index];
                 return multiplierAmounts[index] * intVal;
             }
         }
-        
 
-        if (![leftMultiplier, rightMultiplier].includes("wild") && leftMultiplier !== rightMultiplier){
+
+        if (![leftMultiplier, rightMultiplier].includes("wild") && leftMultiplier !== rightMultiplier) {
             const index = multiplierValues.indexOf("1.9");
             winning_bet = multiplierAmounts[index];
-                return index !== -1 ? multiplierAmounts[index] * 1.9 : 0;
+            return index !== -1 ? multiplierAmounts[index] * 1.9 : 0;
         }
 
         return 0;
@@ -173,12 +175,12 @@ export const spin = async (socket, bet) => {
         betdata: bet,
         status: socket.bet.winAmount === 0 ? "lose" : "win",
         result: `${leftMultiplier},${rightMultiplier}`,
-        winning_bet: socket.bet.winAmount > 0 ? Number(winning_bet): 0,
+        winning_bet: socket.bet.winAmount > 0 ? Number(winning_bet) : 0,
     });
 };
 
 export const sendResult = (socket) => {
-    if (socket.bet){
+    if (socket.bet) {
         socket.emit('result', {
             mult: { leftMultiplier: socket.bet.matchMult[0], rightMultiplier: socket.bet.matchMult[1] },
             winAmount: socket.bet.winAmount,
