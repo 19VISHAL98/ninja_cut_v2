@@ -10,7 +10,6 @@ import { createLogger } from './utilities/logger.js';
 import { checkDatabaseConnection } from './utilities/db-connection.js';
 import { initializeRedis } from './utilities/redis-connection.js';
 import { connect } from './utilities/amqp.js';
-import historyRoute from './router/history-route.js';
 const logger = createLogger('Server');
 
 const startServer = async () => {
@@ -20,7 +19,6 @@ const startServer = async () => {
     var io = new Server(server);
     app.use(cors());
     app.use(json());
-    app.use('/api', historyRoute);
     initSocket(io);
     app.get('/', (req, res) => {
         return res.status(200).send({ status: true, msg: "Double wheel game server is up and running" })

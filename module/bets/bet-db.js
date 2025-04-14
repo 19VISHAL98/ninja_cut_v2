@@ -1,77 +1,69 @@
-import { write, read } from "../../utilities/db-connection.js";
+import { write } from "../../utilities/db-connection.js";
 
+const ADD_BETS_QUERY = `
+  INSERT INTO bets 
+  (match_id, round_data, name, user_id, operator_id, bet_amount, avatar, balance, match_start_time, server_time) 
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
 
-export const insertSettlement = async (data) => {
+const addBetsToDB = async (betData) => {
+    const { matchId, cutFruits, name, id, operatorId, betAmount, avatar, balance, matchStartTime, serverTime,
+    } = betData;
+
     try {
-        const { match_id, user_id, operator_id, bet_amount, win_amount, txn_id, betdata, winning_bet, result, status } = data;
-        const decodeUserId = decodeURIComponent(user_id);
-        console.log("decodeUserId------------", decodeUserId);
-        await write(`INSERT INTO settlement (match_id, user_id, operator_id, bet_amount, win_amount, txn_id, betdata, winning_bet, result, status) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [match_id, decodeUserId, operator_id, Number(bet_amount),
-            Number(win_amount), txn_id, betdata, Number(winning_bet), result, status]);
-        console.log(`Settlement data inserted successfully`);
-    } catch (err) {
-        console.error(`Err while inserting data in table is:::`, err);
+        const userId = decodeURIComponent(id);
+        const result = await write(ADD_BETS_QUERY, [matchId, JSON.stringify(cutFruits), name, userId, operatorId, betAmount, avatar, balance, matchStartTime, serverTime,]);
+        console.log("Bet inserted with ID:", result.insertId);
+    } catch (error) {
+        console.error("Error inserting bet:", error);
+        throw error;
     }
-}
-export const getHistory = async ({ user_id, operator_id, match_id }) => {
-    try {
+};
 
-        const limit = 10;
-        const data = await read(`
-            SELECT 
-                match_id,
-                created_at,
-                bet_amount,
-                win_amount,
-                result
-            FROM 
-                settlement
-            WHERE 
-                user_id = ? AND operator_id = ?
-            ORDER BY 
-                created_at DESC
-            LIMIT ${limit}
-        `, [user_id, operator_id]);
-        return await data;
-    } catch (err) {
-        console.error(`Err while getting data from table is:::`, err);
-        return { err };
-    }
-}
+const ADD_SETTLEMENT_QUERY = `
+  INSERT INTO settlement 
+  (match_id, rounds_data, user_id, operator_id, name, bet_amount, avatar, balance, max_mult, status, match_start_time, match_end_time, server_time) 
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
 
-export const getTopWin = async ({ user_id, operator_id, match_id }) => {
-    try {
-        const limit = 10;
-        const data = await read(`
-            SELECT 
-                user_id,
-                match_id,
-                bet_amount,
-                winning_bet,
-                result as odd,
-                win_amount 
-            FROM 
-                settlement
-            ORDER BY 
-                win_amount DESC
-            LIMIT ${limit}
-        `);
-        return await data;
-    } catch (err) {
-        console.error(`Err while getting data from table is:::`, err);
-        return { err };
-    }
-}
+const addSettlement = async (settlementData) => {
+    const {
+        matchId,
+        cutFruits,
+        name,
+        id,
+        operator_id,
+        betAmount,
+        avatar,
+        balance,
+        matchStartTime,
+        serverTime,
+        matchEndTime,
+        multiplier,
+        status,
+    } = settlementData;
 
-export const getMatchData = async (user_id, operator_id, match_id) => {
     try {
-        const data = await read(`
-            SELECT *
-            FROM settlement
-            WHERE match_id = ? AND user_id = ? AND operator_id = ? `, [match_id, user_id, operator_id]);
-        return data;
-    } catch (err) {
-        console.error(`Err while getting data from table is:::`, err);
-        return { err };
+        const userId = decodeURIComponent(id);
+        const result = await write(ADD_SETTLEMENT_QUERY, [
+            matchId,
+            JSON.stringify(cutFruits),
+            userId,
+            operator_id,
+            name,
+            betAmount,
+            avatar,
+            balance,
+            multiplier,
+            status,
+            matchStartTime,
+            matchEndTime,
+            serverTime,
+        ]);
+        console.log("Settlement inserted with ID:", result.insertId);
+    } catch (error) {
+        console.error("Error inserting settlement:", error);
     }
-}
+};
+
+export { addBetsToDB, addSettlement };
