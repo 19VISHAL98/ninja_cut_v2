@@ -1,6 +1,7 @@
 import { handleDisconnect, stopRoundsForUser } from './lobby/lobbyUtilities.js';
 import { getUserDataFromSource } from './module/players/player-data.js';
 import { registerEvents } from './router/event-route.js';
+import { getRandomAvator } from './utilities/helper-function.js';
 import { setCache, getCache, deleteCache } from "./utilities/redis-connection.js";
 
 
@@ -23,11 +24,12 @@ export const initSocket = (io) => {
             console.log("Invalid token", token);
             return socket.disconnect(true);
         }
-
+        userData.avatar = await getRandomAvator()
         socket.emit('info', {
             user_id: userData.userId,
             operator_id: userData.operatorId,
-            balance: Number(userData.balance).toFixed(2)
+            balance: Number(userData.balance).toFixed(2),
+            avatar: userData.avatar
         });
 
         await setCache(`PL:${socket.id}`, JSON.stringify({ ...userData, socketId: socket.id }), 3600);

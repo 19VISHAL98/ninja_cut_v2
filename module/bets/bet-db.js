@@ -27,12 +27,13 @@ const ADD_SETTLEMENT_QUERY = `
 `;
 
 const addSettlement = async (settlementData) => {
+    console.log({ settlementData })
     const {
         matchId,
         cutFruits,
         name,
         id,
-        operator_id,
+        operatorId,
         betAmount,
         avatar,
         balance,
@@ -49,7 +50,7 @@ const addSettlement = async (settlementData) => {
             matchId,
             JSON.stringify(cutFruits),
             userId,
-            operator_id,
+            operatorId,
             name,
             betAmount,
             avatar,

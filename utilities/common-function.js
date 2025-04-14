@@ -22,7 +22,6 @@ export const generateUUIDv7 = () => {
 export const updateBalanceFromAccount = async (data, key, playerDetails) => {
     try {
         const webhookData = await prepareDataForWebhook({ ...data, game_id: playerDetails.game_id, user_id: playerDetails.user_id }, key);
-        console.log({ webhookData })
         if (key === 'CREDIT') {
             //console.log(key, { webhookData, operatorId: playerDetails.operatorId, token: playerDetails.token })
             await sendToQueue('', 'games_cashout', JSON.stringify({ ...webhookData, operatorId: playerDetails.operatorId, token: playerDetails.token }));

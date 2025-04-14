@@ -21,6 +21,7 @@ export async function placeBet(socket, data) {
     const logReqObj = { betAmount, playerId };
     if (!betAmount) return socket.emit('betError', 'Invalid Bet Amount');
     const playerDetailsStr = await getCache(playerId);
+
     if (!playerDetailsStr) {
       return socket.emit('betError', 'Invalid Player Details');
     }
@@ -116,7 +117,6 @@ async function handleFirstCut(socket, bet, playerDetails, logReqObj) {
   const transaction = await updateBalanceFromAccount(bet, "DEBIT", playerDetails);
   if (!transaction) return socket.emit('betError', 'Bet Cancelled by Upstream');
   playerDetails.balance -= bet.betAmount;
-
   await setCache(playerId, JSON.stringify(playerDetails));
   socket.emit('info', playerDetails);
   return true;
@@ -164,6 +164,7 @@ export async function endMatch(socket, data) {
     bet.winAmount = bet.winAmount < 0.01 ? 0 : Number(bet.winAmount.toFixed(2));
     bet.status = "WIN";
     bet.balance = playerDetails.balance + bet.winAmount;
+    await addSettlement({ ...bet, ...playerDetails });
     const transaction = await updateBalanceFromAccount(bet, "CREDIT", playerDetails);
     if (!transaction) return socket.emit('betError', 'Bet Cancelled by Upstream');
     playerDetails.balance = bet.balance;
