@@ -1,13 +1,12 @@
 import { setTimeout } from 'timers/promises';
 import { createLogger } from '../utilities/logger.js';
 import { write } from '../utilities/db-connection.js';
-import { getCache, deleteCache } from '../utilities/redis-connection.js';
+import { getCache, deleteCache, setCache } from '../utilities/redis-connection.js';
 
 const logger = createLogger('Lobbies', 'jsonl');
 const LOBBY_SQL = `INSERT IGNORE INTO lobbies(lobby_id, start_time, end_time, fruit_data, server_time) VALUES (?,?,?,?,?)`;
 
-let rounds = {};
-const activeIntervals = {};
+const lobbyIntervals = new Map();
 
 function generateFruitData(min, max) {
     const fruitCount = Math.floor(Math.random() * (max - min + 1) + min);
@@ -35,52 +34,60 @@ export function getRandomMultiplier() {
     return (Math.random() * (5.00 - 2.00) + 2.00).toFixed(2);
 }
 
-export async function startRoundsForUser(socket, userId) {
-    if (activeIntervals[userId]) {
-        console.warn(`⚠️ Rounds already running for user ${userId}`);
+export async function startRoundsForUser(socket, lobbyId) {
+    const lobbyData = await getCache(lobbyId);
+    const parsedLobbyData = JSON.parse(lobbyData);
+    console.log("lobby data", JSON.stringify(parsedLobbyData));
+    if (parsedLobbyData) {
+        console.warn(`⚠️ Rounds already running for user ${lobbyId}`);
         return;
     }
     const startTime = Date.now();
-    let isRunning = true;
-
     async function roundHandler() {
-        if (!isRunning || !socket.connected) {
-            stopRoundsForUser(userId);
+        if (!socket.connected) {
+            await stopRoundsForUser(lobbyId);
             return;
         }
 
         const now = Date.now();
-        if (now - startTime >= 5 * 60 * 1000) {
-            stopRoundsForUser(userId);
-            console.log(`⏹️ Stopped rounds for user ${userId}`);
+        if (now - startTime >= 50 * 1000) {
+            await stopRoundsForUser(lobbyId);
+            console.log(`⏹️ Stopped rounds for user ${lobbyId}`);
             return;
         }
 
         try {
-            await handleRound(socket, userId);
+            await handleRound(socket, lobbyId);
         } catch (error) {
-            console.error(`❌ Error in round for user ${userId}:`, error);
-            stopRoundsForUser(userId);
+            console.error(`❌ Error in round for user ${lobbyId}:`, error);
+            await stopRoundsForUser(lobbyId);
         }
     }
 
     await roundHandler();
     const interval = setInterval(roundHandler, 10000);
-    activeIntervals[userId] = interval;
-    console.log(`▶️ Started rounds for user ${userId}`);
+    lobbyIntervals.set(lobbyId, interval);
+    console.log(`▶️ Started rounds for user ${lobbyId}`);
 }
 
-export function stopRoundsForUser(userId) {
-    if (activeIntervals[userId]) {
-        clearInterval(activeIntervals[userId]);
-        delete activeIntervals[userId];
-        console.log(`🛑 Manually stopped rounds for user ${userId}`);
-    } else {
-        console.log(`ℹ️ No active rounds to stop for user ${userId}`);
+export async function stopRoundsForUser(lobbyId) {
+    try {
+        const interval = lobbyIntervals.get(lobbyId); // get the interval object
+        if (interval) {
+            clearInterval(interval); // stop the interval
+            lobbyIntervals.delete(lobbyId); // clean up the memory
+            await deleteCache(lobbyId);
+            console.log(`🛑 Manually stopped rounds for user ${lobbyId}`);
+        } else {
+            console.log(`ℹ️ No active rounds to stop for user ${lobbyId}`);
+        }
+    } catch (error) {
+        console.error("❌ Error occurred during stopping lobby:", error.message);
     }
 }
 
-async function handleRound(socket, userId) {
+
+async function handleRound(socket, lobbyId) {
     const roundId = `ROUND${Date.now()}`;
     const roundStartTime = Date.now();
     const roundEndTime = roundStartTime + 5000;
@@ -93,16 +100,15 @@ async function handleRound(socket, userId) {
         serverTime: Date.now()
     };
 
-    if (!Array.isArray(rounds[userId])) rounds[userId] = [];
-    rounds[userId].push(newRound);
+    await setCache(lobbyId, JSON.stringify(newRound))
 
-    console.log("✅ Round added for user:", userId);
+    console.log("✅ Round added for user:", lobbyId);
 
     if (socket.connected) {
         socket.emit('round', newRound);
     }
 
-    await setTimeout(10000); // simulate wait for round to complete
+    await setTimeout(5000); // simulate wait for round to complete
 
     const dbPayload = [
         newRound.RoundId,
@@ -121,22 +127,20 @@ async function handleRound(socket, userId) {
     } catch (dbErr) {
         console.error("❌ Failed to insert round into DB:", dbErr);
     }
-
-    rounds[userId] = []; // optional: reset rounds for this user
 }
 
-export function getCurrentRound(userId) {
-    const r = rounds[userId];
-    return Array.isArray(r) && r.length > 0 ? r[r.length - 1] : null;
+export async function getCurrentRound(lobbyId) {
+    return JSON.parse(await getCache(lobbyId));
 }
 
-export const handleDisconnect = async (socket) => {
+export async function handleDisconnect(socket) {
     try {
         const cachedData = await getCache(`PL:${socket.id}`);
         if (cachedData) {
             const playerDetails = typeof cachedData === 'string' ? JSON.parse(cachedData) : cachedData;
             if (playerDetails.user_id) {
-                stopRoundsForUser(playerDetails.user_id);
+                const lobbyId = `LB:${playerDetails.operatorId}:${playerDetails.user_id}`;
+                await stopRoundsForUser(lobbyId);
                 console.log(`🛑 User ${playerDetails.user_id} disconnected: ${socket.id}`);
             }
         } else {

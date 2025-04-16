@@ -43,6 +43,7 @@ export const initializeRedis = async () => {
             redisClient = createRedisClient();
             await redisClient.set('test', 'test'); // Test connection
             await redisClient.del('test'); // Clean up
+            await redisClient.flushall();
             logger.info("REDIS CONNECTION SUCCESSFUL");
             return redisClient;
         } catch (err) {

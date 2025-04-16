@@ -313,5 +313,5 @@ const aviatorData = [
 
 export const getRandomAvator = async (user_id, operator_id) => {
   let randomAvatar = aviatorData[Math.floor(Math.random() * (72 - 1 + 1)) + 1];
-  return randomAvatar.url;
+  return randomAvatar?.url;
 }
